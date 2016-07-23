@@ -499,6 +499,62 @@ class Nadam(Optimizer):
         base_config = super(Nadam, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
+class SMORMS3(Optimizer):
+    '''SMORMS3 optimizer.
+
+    Implements the SMORMS3 learning algorithm following the a blog post 
+    by Simon Funk / simonfunk@gmail.com
+
+    http://sifter.org/~simon/journal/20150420.html
+    '''
+    def __init__(self, lr=1e-2, epsilon=1e-8, **kwargs):
+        super(SMORMS3, self).__init__(**kwargs)
+        self.__dict__.update(locals())
+        self.lr = K.variable(lr)
+
+    def get_updates(self, params, constraints, loss):
+        grads = self.get_gradients(loss, params)
+        shapes = [x.shape for x in K.batch_get_value(params)]
+        acc_mean = [K.zeros(shape) for shape in shapes]
+        acc_var  = [K.ones(shape) for shape in shapes] # TODO find a better initialization
+        acc_win  = [K.ones(shape) for shape in shapes]
+        self.weights = acc_mean + acc_var + acc_win
+        self.updates = []
+
+        for p, g, m, v, w in zip(params, grads, acc_mean, acc_var, acc_win):
+
+            # update mean accumulator
+            mul    = 1./(w+1.)
+            new_m  = (1.-mul) * m  + mul * g
+            # update var accumulator
+            new_v  = (1.-mul) * v  + mul * g**2
+            # update integration window size
+            eta    = new_m**2/(v + self.epsilon)
+            new_w  = 1. + w*(1. - eta)
+            # clip learning rate
+            eta_clipped = K.switch(eta<self.lr,eta,self.lr)
+
+            # the parameter update
+            new_p  = p - g/(K.sqrt(v)+self.epsilon)*eta_clipped
+
+            # apply constraints
+            if p in constraints:
+                c = constraints[p]
+                new_p = c(new_p)
+
+            # apply updates
+            self.updates.append(K.update(m, new_m))
+            self.updates.append(K.update(v, new_v))
+            self.updates.append(K.update(w, new_w))
+            self.updates.append(K.update(p, new_p))
+        return self.updates
+
+    def get_config(self):
+        config = {'lr': float(K.get_value(self.lr)),
+                  'epsilon': self.epsilon}
+        base_config = super(SMORMS3, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 # aliases
 sgd = SGD
@@ -508,6 +564,7 @@ adadelta = Adadelta
 adam = Adam
 adamax = Adamax
 nadam = Nadam
+smorms3 = SMORMS3
 
 
 def get(identifier, kwargs=None):
