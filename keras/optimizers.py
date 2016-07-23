@@ -499,6 +499,68 @@ class Nadam(Optimizer):
         base_config = super(Nadam, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
+class SMORMS3(Optimizer):
+    '''SMORMS3 optimizer.
+
+    Implements the SMORMS3 learning algorithm introduced in the blog post 
+    http://sifter.org/~simon/journal/20150420.html
+    by Simon Funk / simonfunk@gmail.com
+
+    The algorithm works well for good initial guesses of the maximum
+    learning rate (lr). To remove this strong learning rate dependence
+    initialize acc_var with ones. However, it seems the initial learning 
+    dynamics are is slower in that case.
+
+    fzenke, Fri 22 Jul 2016 11:40:56 PM PDT
+    '''
+    def __init__(self, lr=1e-3, epsilon=1e-19, **kwargs):
+        super(SMORMS3, self).__init__(**kwargs)
+        self.__dict__.update(locals())
+        self.lr = K.variable(lr)
+
+    def get_updates(self, params, constraints, loss):
+        grads = self.get_gradients(loss, params)
+        shapes = [x.shape for x in K.batch_get_value(params)]
+        acc_mean = [K.zeros(shape) for shape in shapes]
+        # TODO find a more robust initialization for variance
+        acc_var = [K.zeros(shape) for shape in shapes]
+        acc_win = [K.ones(shape) for shape in shapes]
+        self.weights = acc_mean + acc_var + acc_win
+        self.updates = []
+
+        for p, g, m, v, w in zip(params, grads, acc_mean, acc_var, acc_win):
+
+            # update mean accumulator
+            mul   = 1./(w+1.)
+            new_m = (1.-mul) * m  + mul * g
+            # update var accumulator
+            new_v = (1.-mul) * v  + mul * g**2
+            # update integration window size
+            xi    = new_m**2/(new_v + self.epsilon)
+            new_w = 1. + w*(1. - xi)
+            # clip learning rate
+            eta_clipped = K.switch(xi<self.lr,xi,self.lr)
+            # parameter update
+            new_p  = p - g/(K.sqrt(new_v)+self.epsilon)*eta_clipped
+
+            # apply constraints
+            if p in constraints:
+                c = constraints[p]
+                new_p = c(new_p)
+
+            # append updates
+            self.updates.append(K.update(m, new_m))
+            self.updates.append(K.update(v, new_v))
+            self.updates.append(K.update(w, new_w))
+            self.updates.append(K.update(p, new_p))
+        return self.updates
+
+    def get_config(self):
+        config = {'lr': float(K.get_value(self.lr)),
+                  'epsilon': self.epsilon}
+        base_config = super(SMORMS3, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 # aliases
 sgd = SGD
@@ -508,6 +570,7 @@ adadelta = Adadelta
 adam = Adam
 adamax = Adamax
 nadam = Nadam
+smorms3 = SMORMS3
 
 
 def get(identifier, kwargs=None):
