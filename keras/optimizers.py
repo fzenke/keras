@@ -509,7 +509,12 @@ class SMORMS3(Optimizer):
     The algorithm works well for good initial guesses of the maximum
     learning rate (lr). To remove this strong learning rate dependence
     initialize acc_var with ones. However, it seems the initial learning 
-    dynamics are is slower in that case.
+    dynamics are slower in that case.
+
+    # TODO Find a more robust initialization for variance accumulator
+    # The initial behavior seems crucial for fast convergence similar
+    # to what is seen with Adam (due to exponential decay of effictive
+    # learning rate?)
 
     fzenke, Fri 22 Jul 2016 11:40:56 PM PDT
     '''
@@ -522,7 +527,6 @@ class SMORMS3(Optimizer):
         grads = self.get_gradients(loss, params)
         shapes = [x.shape for x in K.batch_get_value(params)]
         acc_mean = [K.zeros(shape) for shape in shapes]
-        # TODO find a more robust initialization for variance
         acc_var = [K.zeros(shape) for shape in shapes]
         acc_win = [K.ones(shape) for shape in shapes]
         self.weights = acc_mean + acc_var + acc_win
